@@ -1,31 +1,29 @@
 from django.shortcuts import render
-from rest_framework import viewsets
 from rest_framework.viewsets import GenericViewSet
 from .serializers import PostSerializer,AuthorSerializer,CategorySerializer,CommentSerializer,TagSerializer,FeedbackSerializer,UserSerializer
 from base.models import Tag,Category,Feedback,Comment,Author,Post
 from rest_framework.response import Response 
-from rest_framework import status
-from rest_framework.permissions import IsAuthenticated,DjangoModelPermissions,BasePermission
+from rest_framework import status,viewsets,filters
+from django.contrib.auth.models import User,Group
+from rest_framework.permissions import IsAuthenticated,DjangoModelPermissions,BasePermission,AllowAny
 from rest_framework.decorators import api_view,permission_classes
-from django.contrib.auth.models import User
 from django.contrib.auth.hashers import make_password
 from django.contrib.auth import  authenticate
 from rest_framework.authtoken.models import Token
 from django_filters.rest_framework import DjangoFilterBackend
-from rest_framework import filters
 from rest_framework.filters import SearchFilter
 from django.core.mail import send_mail
-from rest_framework.permissions import AllowAny
+
 #defining and improting the modules used on the base views
 # Create your views here.
 
 class IsAuthorGroup(BasePermission):#allowing only author group to do perticular tasks(personal prefrence)
     def has_permission(self,request,view):
-        return request.user.is_authenticated and request.user.groups.filter(name='Authors').exists()#permission for only authors role or author group based.
+        return request.user.is_authenticated and request.user.groups.filter(name='Author').exists()#permission for only authors role or author group based.
     
 class IsMemberGroup(BasePermission):##allowing only members group to do perticular tasks(personal prefrence)
     def has_permission(seld,request,view):
-        return request.user.is_authenticated and request.user.groups.filter(name='Members').exists()#permission for only member role or memeber group based.    
+        return request.user.is_authenticated and request.user.groups.filter(name='Member').exists()#permission for only member role or memeber group based.    
 
 #to manage blog tags and seraching name by filters)
 class TagApiView(viewsets.ModelViewSet):
@@ -43,58 +41,63 @@ class CategoryApiView(viewsets.ModelViewSet):
 class PostApiView(GenericViewSet):
     queryset=Post.objects.all()
     serializer_class=PostSerializer
-    permission_classes=[IsAuthenticated,IsAuthorGroup]
+    permission_classes=[DjangoModelPermissions,IsAuthorGroup]
     filter_backends = [DjangoFilterBackend,filters.SearchFilter]
     filterset_fields=['category','created_at']
     search_fields=['title','category__name','author__user__username']
+
     def list(self,request):#returns list of all the blog posts.
         post_objs=self.filter_queryset(self.get_queryset())
         page=self.paginate_queryset(post_objs)#handles the pagination.
-        if page==None:
-            serializer=PostSerializer(post_objs,many=True)
+        if page is not None:
+            serializer=PostSerializer(page,many=True)
             return self.get_paginated_response(serializer.data)#for returning pagination,filterting,serarching as response.
-
+        serializer=PostSerializer(post_objs,many=True)
+        return Response(serializer.data)    
     def create(self,request):#to create a new poset on a blog.
         serializer=PostSerializer(data=request.data)
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data,status=status.HTTP_201_CREATED)
-        else:
-            return Response(serializer.errors,status=status.HTTP_400_BAD_REQUEST)   
+        return Response(serializer.errors,status=status.HTTP_400_BAD_REQUEST)   
 
-    def update(self,request,pk=None):#to update relevent information and details on a blog post.
+    def update(self, request, pk=None):
         try:
-            post_objs=Post.objects.get(id=pk)
-        except:
-            return Response({'detail': 'no data found'},status=status.HTTP_404_NOT_FOUND)    
-        serializer=PostSerializer(post_objs,data=request.data)
+            post = Post.objects.get(id=pk)
+        except Post.DoesNotExist:
+            return Response({'error': 'Post not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = PostSerializer(post, data=request.data)
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data)
-        else:
-            return Response(serializer.errors,status=status.HTTP_400_BAD_REQUEST)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
         
-    def destroy(self,request,pk=None):#to simply delete a post of the blog.
+    def destroy(self, request, pk=None):
         try:
-            post_objs=Post.objects.get(id=pk)
-        except:
-            return Response ({'details':'no data found'},status=status.HTTP_404_NOT_FOUND)
-        post_objs.delete()
+            post = Post.objects.get(id=pk)
+        except Post.DoesNotExist:
+            return Response({'error': 'Post not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        post.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
-    def  retrieve(self,request,pk=None):#to retrieve a single post of a blog by id.
+
+    def retrieve(self, request, pk=None):
         try:
-            post_objs=Post.objects.get(id=pk) 
-        except:
-            return Response({'details':'no data found'})
-        serializer=PostSerializer(post_objs)
-        return Response(serializer.data)  
+            post = Post.objects.get(id=pk)
+        except Post.DoesNotExist:
+            return Response({'error': 'Post not found'}, status=status.HTTP_404_NOT_FOUND)
+    
+        serializer = PostSerializer(post)
+        return Response(serializer.data)
 
 #viewsets to handle comments (autheticated users only)   
 class CommentApiView(viewsets.ModelViewSet):
     queryset=Comment.objects.all()
     serializer_class=CommentSerializer
-    permission_classes=[IsAuthenticated,IsAuthorGroup]
+    permission_classes=[IsAuthenticated]
 
 #viewsets to handle like/dislike on posts.
 class FeedbackApiView(viewsets.ModelViewSet):
@@ -106,38 +109,56 @@ class FeedbackApiView(viewsets.ModelViewSet):
 class AuthorApiView(viewsets.ModelViewSet):
     queryset=Author.objects.all()
     serializer_class=AuthorSerializer 
-    permission_classes=[IsAuthenticated]
+    permission_classes=[]
      
-@api_view(['POST'])
-def register_api_view(request):
-    #handling user registration with password hasing and a welcome email.
-    password=request.data.get('password')
-    hash_password=make_password(password)
-    data=request.data.copy()
-    data['password']=hash_password
+from django.contrib.auth.models import Group
 
-    serializer=UserSerializer(data=data)
-    if serializer.is_valid():
-        serializer.save()
-        email=request.data.get('email')
-        send_mail(subject='WELCOME TO BLOG PLATFORM',message='sucessfully registered to the blog platform.',from_email='sonammagar017@gmail.com',recipient_list=[email])
-        return Response(serializer.data,status=status.HTTP_201_CREATED)
-    else:
-        return Response(serializer.errors,status=status.HTTP_400_BAD_REQUEST)
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def register_api_view(request):
+    role = request.data.get('role', '').capitalize()
+    if role not in ['Author', 'Member']:
+        return Response({'error': 'Invalid role.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    username = request.data.get('username')
+    email = request.data.get('email')
+    password = request.data.get('password')
+
+    if not username or not password:
+        return Response({'error': 'Username and password are required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if User.objects.filter(username=username).exists():
+        return Response({'error': 'Username already taken'}, status=status.HTTP_400_BAD_REQUEST)
+
+    user = User.objects.create_user(username=username, email=email, password=password)
+    user.save()
+    
+    group, _ = Group.objects.get_or_create(name=role)
+    user.groups.add(group)
+
+    # Welcome email
+    send_mail(subject='WELCOME TO BLOG PLATFORM',message=f'Successfully registered as a {role}.',from_email='sonammagar017@gmail.com',recipient_list=[email],fail_silently=True)
+
+    return Response({'message': 'User registered successfully'}, status=status.HTTP_201_CREATED)
+
     
 @api_view(['POST'])
+@permission_classes([AllowAny])
 def login_api_view(request):
     #handling user login and authetication token in return.
     username=request.data.get('username')    
     password=request.data.get('password') 
 
+    if not username or not password:
+        return Response({'error':'ENTER VALID USERNAME AND PASSWORD.'},status=status.HTTP_400_BAD_REQUEST)
+
     user=authenticate(username=username,password=password)   
 
-    if user==None:
-        return Response({'details':'INVALID CREDENTIALS'},status=status.HTTP_400_BAD_REQUEST)
-    else:
-        token,_=Token.objects.get_or_create(user=user)
-        return Response(token.key)
+    if user is None:
+        return Response({'error': 'Invalid credentials'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    token,_=Token.objects.get_or_create(user=user)
+    return Response({'token':token.key})
   
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
@@ -151,7 +172,7 @@ def logout_api_view(request):
 class PublicPostView(viewsets.ReadOnlyModelViewSet):#allows the public user to just read or view the post without any authentications.(added extra for better feature)
     queryset=Post.objects.all()
     serializer_class=PostSerializer
-    permission_classes=[AllowAny]#allows anu unauthorised user 
+    permission_classes=[AllowAny]#allows any unauthorised user 
 
 
 
