@@ -13,7 +13,7 @@ from rest_framework.authtoken.models import Token
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter
 from django.core.mail import send_mail
-
+from django.shortcuts import render,get_object_or_404
 #defining and improting the modules used on the base views
 # Create your views here.
 
@@ -173,6 +173,18 @@ class PublicPostView(viewsets.ReadOnlyModelViewSet):#allows the public user to j
     queryset=Post.objects.all()
     serializer_class=PostSerializer
     permission_classes=[AllowAny]#allows any unauthorised user 
+
+def blog_list(request):
+    posts = Post.objects.all()
+    return render(request, 'base/blog_list.html', {'posts': posts})
+
+def blog_detail(request, slug):
+    post = get_object_or_404(Post, slug=slug)
+    return render(request, 'base/blog_details.html', {'post': post})
+
+def category_posts(request, category_slug):
+    posts = Post.objects.filter(category__slug=category_slug)
+    return render(request, 'base/blog_category.html', {'posts': posts})
 
 
 

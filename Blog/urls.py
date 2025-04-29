@@ -16,8 +16,16 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path
-from base.views import TagApiView,CategoryApiView,PostApiView,AuthorApiView,CommentApiView,FeedbackApiView,register_api_view,login_api_view,logout_api_view,PublicPostView
+from base.views import TagApiView,CategoryApiView,PostApiView,AuthorApiView,CommentApiView,FeedbackApiView,register_api_view,login_api_view,logout_api_view,PublicPostView,blog_detail,blog_list,category_posts
 from base.models import Tag,Category,Post,Feedback,Comment,Author
+from base import views
+from django.http import HttpResponse
+
+
+def favicon_view(request):
+    return HttpResponse(status=204)
+
+
 urlpatterns = [
     #blog features 
     path('admin/', admin.site.urls),
@@ -38,6 +46,9 @@ urlpatterns = [
     path('login/',login_api_view),
     path('logout/',logout_api_view),
     #for the public viewing (extra)
-    path('public-posts/',PublicPostView.as_view({'get':'list'}))
+    path('public-posts/',PublicPostView.as_view({'get':'list'})),
+    path('', views.blog_list, name='blog_list'),  # Homepage → all posts
+    path('post/<slug:slug>/', views.blog_detail, name='blog_detail'),  # Single post page
+    path('category/<slug:category_slug>/', views.category_posts, name='category_posts') # Category page
     
 ]
